@@ -1,0 +1,25 @@
+curl -X POST http://127.0.0.1:7861/gradio_api/call/generate -s -H "Content-Type: application/json" -d '{
+  "data": [
+       {"path":"/tmp/gradio/xwd/123.png",
+              "meta": {
+          "_type": "gradio.FileData"
+        }},
+       {"path":"/tmp/gradio/xwd/generated_audio_20241205_095059.wav",
+              "meta": {
+          "_type": "gradio.FileData"
+        }},
+       "assets/halfbody_demo/pose/01",
+      768,
+      768,
+      240,
+      20,
+      16000,
+      2.5,
+      24,
+      12,
+      3,
+      false,
+      -1
+]}' \
+  | awk -F'"' '{ print $4}'  \
+  | read EVENT_ID; curl -N http://119.255.238.247:7861/gradio_api/call/generate/$EVENT_ID

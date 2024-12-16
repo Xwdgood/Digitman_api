@@ -1,0 +1,22 @@
+import gradio as gr
+import tempfile
+import os
+
+# 方法1: 使用系统临时目录
+print("系统临时目录:", tempfile.gettempdir())
+
+# 方法2: 在启动时指定临时目录并打印
+custom_temp = "/tmp/my_gradio_temp"  # 自定义临时目录
+os.makedirs(custom_temp, exist_ok=True)
+
+demo = gr.Interface(
+    # ... 你的接口配置 ...
+).launch(
+    temp_dir=custom_temp
+)
+print("Gradio临时目录:", custom_temp)
+
+# 方法3: 在处理函数中打印当前工作目录
+def process_audio(*args):
+    print("当前工作目录:", os.getcwd())
+    return result

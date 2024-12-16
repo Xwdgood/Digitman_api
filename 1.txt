@@ -1,0 +1,22 @@
+curl -X POST http://119.255.238.247:50000/call/generate_audio -s -H "Content-Type: application/json" -d '{
+  "data": [
+							"我正在测试API我正在测试API",
+							"3s极速复刻",
+							"中文女",
+							"你好我叫许文铎，我正在测试API",
+							{"path":"http://10.204.10.11:1107/123.wav"},
+							{"path":"http://10.204.10.11:1107/123.wav"},
+							"Hello!!",
+							3,
+							"false",
+							3
+]}'
+
+
+
+ \
+  | awk -F'"' '{ print $4}'  \
+  | read EVENT_ID; curl -N http://119.255.238.247:50000/call/generate_audio/$EVENT_ID
+curl -N "http://119.255.238.247:50000/call/generate_audio/7c61d60b35e243d696073aca13d43923"
+
+eventid： baaef8214049454fae292ac4a8e889b0
