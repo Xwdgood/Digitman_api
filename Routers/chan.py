@@ -10,8 +10,9 @@ from fastapi.responses import JSONResponse
 from datetime import datetime
 from sse_starlette import EventSourceResponse  # 使用 sse_starlette 库
 import asyncio
-import json
-import subprocess
+import pynvml
+import time
+from fastapi.responses import JSONResponse
 
 
 
@@ -158,9 +159,6 @@ async def call_gradio_api(
     image_name: str = Query(..., description="Image file name (e.g., generated_audio_20241207_0858.jpg)")
 ):
     try:
-        # 启动并行任务：获取 GPU 数据
-        gpu_task = asyncio.create_task(get_gpu_usage())  # 获取 GPU 数据的任务
-
         # 打印接收到的音频和图片文件名
         print(f"Received audio_name: {audio_name}")
         print(f"Received image_name: {image_name}")
@@ -173,7 +171,7 @@ async def call_gradio_api(
         print(f"Image file path: {image_path}")
 
         # 第一阶段：发起POST请求，获取event_id
-        url = "http://119.255.238.247:7860/gradio_api/call/generate"  # 修改为实际的 Gradio API 地址
+        url = "http://10.204.10.11:7860/gradio_api/call/generate"  # 修改为实际的 Gradio API 地址
         data = {
             "data": [
                 {"path": image_path, "meta": {"_type": "gradio.FileData"}},
@@ -209,7 +207,7 @@ async def call_gradio_api(
 
             if event_id:
                 # 第二阶段：通过event_id进行查询
-                event_url = f"http://119.255.238.247:7860/gradio_api/call/generate/{event_id}"
+                event_url = f"http://10.204.10.11:7860/gradio_api/call/generate/{event_id}"
                 print(f"Sending GET request to fetch event results for event_id: {event_id}")
                 event_response = requests.get(event_url)
 
@@ -218,10 +216,8 @@ async def call_gradio_api(
                 print(f"Event API response content: {event_response.text}")
 
                 if event_response.status_code == 200:
-                    # 等待 GPU 使用数据的任务完成
-                    gpu_result = await gpu_task  # 这里等待 GPU 数据任务完成
-                    # 返回两个任务的结果
-                    return JSONResponse(content={"gpu_data": gpu_result, "gradio_data": event_response.json()})
+                    # 直接返回 Gradio 的结果，不再涉及 GPU 数据
+                    return JSONResponse(content={"gradio_data": event_response.json()})
                 else:
                     return JSONResponse(content={"success": False, "error": "Failed to retrieve event results"})
             else:
@@ -237,69 +233,67 @@ async def call_gradio_api(
 
 
 
+# 文件上传接口
 @router.post("/upload-audio-and-image")
 async def upload_audio_and_image(image_file: UploadFile = File(...)):
     """
-    接收上传的图片文件并保存到远程服务器
+    接收上传的图片文件并保存到指定路径
     """
     try:
-        # 保存图片文件到本地
-        image_local_path = f"/tmp/{image_file.filename}"
+        # 设置目标路径
+        target_path = "/tmp/gradio/xwd/"
+        if not os.path.exists(target_path):
+            os.makedirs(target_path)  # 如果目标目录不存在则创建
+
+        # 保存图片文件到指定路径
+        image_local_path = os.path.join(target_path, image_file.filename)
         with open(image_local_path, "wb") as image_buffer:
             shutil.copyfileobj(image_file.file, image_buffer)
 
-        # 上传图片文件到远程服务器
-        remote_image_path = f"/tmp/gradio/xwd/{image_file.filename}"
-        upload_file_to_server(image_local_path, remote_image_path)
-
-        # 删除本地临时文件
-        os.remove(image_local_path)
-
-        return {"success": True, "message": "图片文件上传成功！"}
+        return {"success": True, "message": f"图片文件上传成功！文件路径: {image_local_path}"}
     except Exception as e:
-        logger.error(f"Error during file upload: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
-# 获取 GPU 使用数据的异步函数
-async def get_gpu_usage():
-    # 执行 nvidia-smi 命令
-    result = subprocess.run(
-        ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,fan.speed", "--format=csv,noheader,nounits"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    
-    # 读取输出
-    result_str = result.stdout.decode().strip()
+# 初始化 NVIDIA GPU 管理工具
+def init_nvidia_ml():
+    try:
+        pynvml.nvmlInit()
+        return True
+    except pynvml.NVMLError as error:
+        return False
 
-    # 处理输出
-    gpu_info = result_str.split("\n")
-    gpu_usage = []
-    for line in gpu_info:
-        values = line.split(", ")
-        gpu_usage.append({
-            "utilization": int(values[0].replace("%", "")),
-            "memory_used": int(values[1].replace("MiB", "")),
-            "memory_total": int(values[2].replace("MiB", "")),
-            "temperature": int(values[3].replace("C", "")),
-            "power_usage": float(values[4].replace("W", "")),
-            "power_limit": float(values[5].replace("W", "")),
-            "fan_speed": int(values[6].replace("rpm", ""))
+# 获取 GPU 数据接口
+@router.get("/gpu-stats")
+async def get_gpu_stats():
+    if not init_nvidia_ml():
+        return JSONResponse(content={"error": "Failed to initialize NVIDIA ML"}, status_code=500)
+
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # 获取第一个GPU
+        
+        # 获取 GPU 信息
+        memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+        temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+        power_usage = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # 单位转化为千瓦（kW）
+        power_limit = pynvml.nvmlDeviceGetEnforcedPowerLimit(handle) / 1000.0  # 单位转化为千瓦（kW）
+        
+        try:
+            fan_speed = pynvml.nvmlDeviceGetFanSpeed(handle)
+        except pynvml.NVMLError:
+            fan_speed = 0  # 如果无法获取风扇转速，则默认设为0
+
+        # 返回 GPU 状态信息
+        return JSONResponse({
+            'timestamp': int(time.time() * 1000),  # 时间戳
+            'utilization': utilization.gpu,  # GPU 使用率
+            'memory_used': memory.used / 1024**2,  # 已使用内存 (MB)
+            'memory_total': memory.total / 1024**2,  # 总内存 (MB)
+            'temperature': temperature,  # GPU 温度 (C)
+            'power_usage': power_usage,  # 功耗 (kW)
+            'power_limit': power_limit,  # 功率限制 (kW)
+            'fan_speed': fan_speed  # 风扇转速 (rpm)
         })
-    
-    return {
-        "gpu_usage": gpu_usage,
-        "current_time": "2024-12-12 10:00:00"  # 根据实际需要生成当前时间
-    }
 
-# 实时流式传输 GPU 数据
-async def event_stream():
-    while True:
-        gpu_usage = await get_gpu_usage()
-        data = json.dumps(gpu_usage)
-        yield f"data: {data}\n\n"
-        await asyncio.sleep(1)  # 每秒发送一次
-
-# 接口返回实时 GPU 数据
-@router.get("/gpu-usage")
-async def gpu_usage():
-    return EventSourceResponse(event_stream())  # 使用 EventSourceResponse 返回数据流
+    except pynvml.NVMLError as error:
+        return JSONResponse(content={"error": str(error)}, status_code=500)

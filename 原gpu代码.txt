@@ -1,0 +1,43 @@
+# 获取 GPU 使用数据的异步函数
+async def get_gpu_usage():
+    # 执行 nvidia-smi 命令
+    result = subprocess.run(
+        ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,fan.speed", "--format=csv,noheader,nounits"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    
+    # 读取输出
+    result_str = result.stdout.decode().strip()
+
+    # 处理输出
+    gpu_info = result_str.split("\n")
+    gpu_usage = []
+    for line in gpu_info:
+        values = line.split(", ")
+        gpu_usage.append({
+            "utilization": int(values[0].replace("%", "")),
+            "memory_used": int(values[1].replace("MiB", "")),
+            "memory_total": int(values[2].replace("MiB", "")),
+            "temperature": int(values[3].replace("C", "")),
+            "power_usage": float(values[4].replace("W", "")),
+            "power_limit": float(values[5].replace("W", "")),
+            "fan_speed": int(values[6].replace("rpm", ""))
+        })
+    
+    return {
+        "gpu_usage": gpu_usage,
+        "current_time": "2024-12-12 10:00:00"  # 根据实际需要生成当前时间
+    }
+
+# 实时流式传输 GPU 数据
+async def event_stream():
+    while True:
+        gpu_usage = await get_gpu_usage()
+        data = json.dumps(gpu_usage)
+        yield f"data: {data}\n\n"
+        await asyncio.sleep(1)  # 每秒发送一次
+
+# 接口返回实时 GPU 数据
+@router.get("/gpu-usage")
+async def gpu_usage():
+    return EventSourceResponse(event_stream())  # 使用 EventSourceResponse 返回数据流

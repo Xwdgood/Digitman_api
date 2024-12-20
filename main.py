@@ -62,7 +62,7 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=False,  # 开发模式可设置为 True
-        workers=1,
+        workers=4,
         use_colors=True,
         timeout_keep_alive=0,
         timeout_graceful_shutdown=3,
